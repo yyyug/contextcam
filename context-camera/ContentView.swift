@@ -29,9 +29,9 @@ struct ContentView: View {
     // Sequential capture state
     @State private var isContinuousCapture = false
 
-    #if canImport(Translation)
-    @State private var translationRequest: CaptionTranslationRequest?
-    #endif
+    @State private var translationRequestID = UUID()
+    @State private var translationSourceText: String?
+    @State private var translationTargetLanguageIdentifier: String?
 
     func calculateBase64SizeInBytes(base64String: String) {
         let base64Length = base64String.count
@@ -100,10 +100,9 @@ struct ContentView: View {
         if #available(iOS 18.0, *),
            CaptionTranslationSupport.shouldAttemptTranslation(for: trimmedCaption),
            let targetLanguageIdentifier = CaptionTranslationSupport.preferredTargetLanguage() {
-            translationRequest = CaptionTranslationRequest(
-                sourceText: trimmedCaption,
-                targetLanguageIdentifier: targetLanguageIdentifier
-            )
+            translationRequestID = UUID()
+            translationSourceText = trimmedCaption
+            translationTargetLanguageIdentifier = targetLanguageIdentifier
             return
         }
         #endif
@@ -115,12 +114,12 @@ struct ContentView: View {
         apiResponse = caption
         announceCaptionForAccessibility(caption)
         isAnalysisPending = false
+        clearTranslationRequest()
+    }
 
-        #if canImport(Translation)
-        if #available(iOS 18.0, *) {
-            translationRequest = nil
-        }
-        #endif
+    private func clearTranslationRequest() {
+        translationSourceText = nil
+        translationTargetLanguageIdentifier = nil
     }
 
     /// Announces the latest caption so VoiceOver users hear the result immediately.
@@ -284,46 +283,45 @@ struct ContentView: View {
     @ViewBuilder
     private var captionTranslationView: some View {
         #if canImport(Translation)
-        if #available(iOS 18.0, *), let request = translationRequest {
+        if #available(iOS 18.0, *),
+           let sourceText = translationSourceText,
+           let targetLanguageIdentifier = translationTargetLanguageIdentifier {
             Color.clear
                 .frame(width: 0, height: 0)
-                .translationTask(request.configuration) { session in
+                .translationTask(translationConfiguration(targetLanguageIdentifier: targetLanguageIdentifier)) { session in
+                    let requestID = translationRequestID
                     do {
-                        let response = try await session.translate(request.sourceText)
+                        let response = try await session.translate(sourceText)
                         await MainActor.run {
-                            guard translationRequest?.id == request.id else { return }
+                            guard translationRequestID == requestID else { return }
                             let translatedCaption = response.targetText.trimmingCharacters(in: .whitespacesAndNewlines)
-                            presentCaption(translatedCaption.isEmpty ? request.sourceText : translatedCaption)
+                            presentCaption(translatedCaption.isEmpty ? sourceText : translatedCaption)
                         }
                     } catch {
                         await MainActor.run {
-                            guard translationRequest?.id == request.id else { return }
-                            presentCaption(request.sourceText)
+                            guard translationRequestID == requestID else { return }
+                            presentCaption(sourceText)
                         }
                     }
                 }
+        } else {
+            EmptyView()
         }
         #else
         EmptyView()
         #endif
     }
-}
 
-#if canImport(Translation)
-@available(iOS 18.0, *)
-private struct CaptionTranslationRequest: Equatable {
-    let id = UUID()
-    let sourceText: String
-    let targetLanguageIdentifier: String
-
-    var configuration: TranslationSession.Configuration {
+    #if canImport(Translation)
+    @available(iOS 18.0, *)
+    private func translationConfiguration(targetLanguageIdentifier: String) -> TranslationSession.Configuration {
         TranslationSession.Configuration(
             source: nil,
             target: Locale.Language(identifier: targetLanguageIdentifier)
         )
     }
+    #endif
 }
-#endif
 
 private enum CaptionTranslationSupport {
     static func preferredTargetLanguage() -> String? {
@@ -357,6 +355,3 @@ struct ContentView_Previews: PreviewProvider {
         ContentView()
     }
 }
-
-
-
