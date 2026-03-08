@@ -8,47 +8,54 @@
 import SwiftUI
 import UIKit
 import Foundation
+import NaturalLanguage
+
+#if canImport(Translation)
+import Translation
+#endif
 
 struct ContentView: View {
     @StateObject private var contextManager = ContextManager.shared
     @State private var cameraController: CameraController?
     @State private var apiResponse = ""
     @State private var isAnalysisPending = false
-    
+
     // UI state management
     @State private var showGreenFlash = false
     @State private var showMessage = false
     @State private var displayText = ""
     @State private var captureState: CaptureState = .ready
-    
+
     // Sequential capture state
     @State private var isContinuousCapture = false
-    
+
+    #if canImport(Translation)
+    @State private var translationRequest: CaptionTranslationRequest?
+    #endif
+
     func calculateBase64SizeInBytes(base64String: String) {
         let base64Length = base64String.count
         let sizeInBytes = (base64Length * 3) / 4
         let sizeInKiloBytes = sizeInBytes / 1024
-        print("AI Analysis: Image size ≈\(sizeInKiloBytes)KB")
+        print("AI Analysis: Image size ~\(sizeInKiloBytes)KB")
     }
-    
+
     func sendImageForCaption(imageData: Data) {
         isAnalysisPending = true
-        
+
         // Convert image data to base64
         let base64String = imageData.base64EncodedString()
         calculateBase64SizeInBytes(base64String: base64String)
-        
+
         // Create data URL for Moondream
         let dataURL = "data:image/jpeg;base64,\(base64String)"
-        
+
         MoondreamService.shared.generateCaption(for: dataURL) { result in
             DispatchQueue.main.async {
                 switch result {
                 case .success(let caption):
-                    self.apiResponse = caption
-                    self.announceCaptionForAccessibility(caption)
-                    self.isAnalysisPending = false
-                    
+                    self.handleCaptionSuccess(caption)
+
                     // Check for contexts using direct queries to Moondream
                     ContextManager.shared.checkForContexts(imageBase64: dataURL) { action in
                         DispatchQueue.main.async {
@@ -57,18 +64,18 @@ struct ContentView: View {
                             }
                         }
                     }
-                    
+
                     // Continue capturing if continuous mode is enabled
                     if self.isContinuousCapture {
                         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
                             self.captureImageForAnalysis()
                         }
                     }
-                    
+
                 case .failure(let error):
                     self.apiResponse = error.localizedDescription
                     self.isAnalysisPending = false
-                    
+
                     // Continue capturing even on error if continuous mode is enabled
                     if self.isContinuousCapture {
                         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
@@ -79,22 +86,58 @@ struct ContentView: View {
             }
         }
     }
-    
+
+    private func handleCaptionSuccess(_ caption: String) {
+        let trimmedCaption = caption.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard !trimmedCaption.isEmpty else {
+            apiResponse = ""
+            isAnalysisPending = false
+            return
+        }
+
+        #if canImport(Translation)
+        if #available(iOS 18.0, *),
+           CaptionTranslationSupport.shouldAttemptTranslation(for: trimmedCaption),
+           let targetLanguageIdentifier = CaptionTranslationSupport.preferredTargetLanguage() {
+            translationRequest = CaptionTranslationRequest(
+                sourceText: trimmedCaption,
+                targetLanguageIdentifier: targetLanguageIdentifier
+            )
+            return
+        }
+        #endif
+
+        presentCaption(trimmedCaption)
+    }
+
+    private func presentCaption(_ caption: String) {
+        apiResponse = caption
+        announceCaptionForAccessibility(caption)
+        isAnalysisPending = false
+
+        #if canImport(Translation)
+        if #available(iOS 18.0, *) {
+            translationRequest = nil
+        }
+        #endif
+    }
+
     /// Announces the latest caption so VoiceOver users hear the result immediately.
     private func announceCaptionForAccessibility(_ caption: String) {
         guard !caption.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         UIAccessibility.post(notification: .announcement, argument: caption)
     }
-    
+
     /// Trigger the visual feedback for detected actions
     private func triggerActionUI(actionText: String) {
         displayText = actionText
-        
+
         withAnimation(.easeInOut(duration: 0.5)) {
             showGreenFlash = true
             showMessage = true
         }
-        
+
         // Auto-hide after delay
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
             withAnimation(.easeOut(duration: 0.5)) {
@@ -103,28 +146,28 @@ struct ContentView: View {
             }
         }
     }
-    
+
     /// Start continuous sequential capture
     private func startContinuousCapture() {
         guard !isContinuousCapture else { return }
-        
+
         isContinuousCapture = true
         captureState = .capturing
-        
+
         // Start the first capture
         captureImageForAnalysis()
-        
+
         print("Started continuous sequential capture")
     }
-    
+
     /// Stop continuous capture
     private func stopContinuousCapture() {
         isContinuousCapture = false
         captureState = .ready
-        
+
         print("Stopped continuous capture")
     }
-    
+
     /// Capture a single image for AI analysis
     private func captureImageForAnalysis() {
         // Don't capture if already processing
@@ -132,7 +175,7 @@ struct ContentView: View {
             print("Skipping capture - analysis still pending")
             return
         }
-        
+
         cameraController?.capturePhoto { imageData in
             DispatchQueue.main.async {
                 if let imageData = imageData {
@@ -149,12 +192,12 @@ struct ContentView: View {
             }
         }
     }
-    
+
     var body: some View {
         ZStack {
             CameraCaptureView(cameraView: $cameraController, captureState: $captureState)
                 .edgesIgnoringSafeArea(.all)
-            
+
             // Success flashing UI
             if showGreenFlash {
                 Color.green.opacity(0.5)
@@ -162,7 +205,7 @@ struct ContentView: View {
                     .transition(.opacity)
                     .zIndex(1)
             }
-            
+
             // Message display
             if showMessage {
                 VStack {
@@ -189,12 +232,12 @@ struct ContentView: View {
                             Circle()
                                 .fill(isAnalysisPending ? Color.orange : (isContinuousCapture ? Color.green : Color.gray))
                                 .frame(width: 12, height: 12)
-                            
+
                             Text(isAnalysisPending ? "Analyzing..." : (isContinuousCapture ? "Live Capture" : "Stopped"))
                                 .font(.caption)
                                 .foregroundColor(.white)
                         }
-                        
+
                         // Current AI Response
                         if !apiResponse.isEmpty {
                             Text(apiResponse)
@@ -207,11 +250,11 @@ struct ContentView: View {
                                 .lineLimit(3)
                         }
                     }
-                    
+
                     Spacer()
                 }
                 .padding(.horizontal, 20)
-                                
+
                 Button(action: {
                     // Toggle continuous capture
                     if isContinuousCapture {
@@ -229,11 +272,73 @@ struct ContentView: View {
                 }
                 .padding(.bottom, 40)
             }
+
+            captionTranslationView
         }
         .onDisappear {
             // Stop capture when view disappears
             stopContinuousCapture()
         }
+    }
+
+    @ViewBuilder
+    private var captionTranslationView: some View {
+        #if canImport(Translation)
+        if #available(iOS 18.0, *), let request = translationRequest {
+            Color.clear
+                .frame(width: 0, height: 0)
+                .translationTask(request.configuration) { session in
+                    do {
+                        let response = try await session.translate(request.sourceText)
+                        await MainActor.run {
+                            guard translationRequest?.id == request.id else { return }
+                            let translatedCaption = response.targetText.trimmingCharacters(in: .whitespacesAndNewlines)
+                            presentCaption(translatedCaption.isEmpty ? request.sourceText : translatedCaption)
+                        }
+                    } catch {
+                        await MainActor.run {
+                            guard translationRequest?.id == request.id else { return }
+                            presentCaption(request.sourceText)
+                        }
+                    }
+                }
+        }
+        #else
+        EmptyView()
+        #endif
+    }
+}
+
+#if canImport(Translation)
+@available(iOS 18.0, *)
+private struct CaptionTranslationRequest: Equatable {
+    let id = UUID()
+    let sourceText: String
+    let targetLanguageIdentifier: String
+
+    var configuration: TranslationSession.Configuration {
+        TranslationSession.Configuration(
+            source: nil,
+            target: Locale.Language(identifier: targetLanguageIdentifier)
+        )
+    }
+}
+#endif
+
+private enum CaptionTranslationSupport {
+    static func preferredTargetLanguage() -> String? {
+        Locale.preferredLanguages.first
+    }
+
+    static func shouldAttemptTranslation(for caption: String) -> Bool {
+        let trimmedCaption = caption.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedCaption.isEmpty else { return false }
+        guard let targetLanguage = preferredTargetLanguage() else { return false }
+
+        let targetCode = Locale(identifier: targetLanguage).language.languageCode?.identifier.lowercased()
+        let sourceCode = Locale(identifier: NLLanguageRecognizer.dominantLanguage(for: trimmedCaption)?.rawValue ?? "").language.languageCode?.identifier.lowercased()
+
+        return targetCode != nil && targetCode != sourceCode
     }
 }
 
@@ -252,4 +357,6 @@ struct ContentView_Previews: PreviewProvider {
         ContentView()
     }
 }
+
+
 
