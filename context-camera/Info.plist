@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>MOONDREAM_API_KEY</key>
+	<string>eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJrZXlfaWQiOiIzYzBlMGEyMy1hZTViLTQ2ZDEtYmNkMi1mZTRhNTQ5MzRiNzQiLCJvcmdfaWQiOiJTdHJVTUZuSzVCUEN2VFh0c2U4a2VVbHdDZmk3Vk9wYyIsImlhdCI6MTc3Mjk3Mjg3MCwidmVyIjoxfQ.f_KT4PzXe7zgeQrgbJGEfvnhUjh_9yQzzbI1LZZkGXY</string>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsArbitraryLoads</key>
+		<true/>
+	</dict>
+</dict>
+</plist>
