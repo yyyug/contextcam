@@ -247,21 +247,48 @@ struct ContentView: View {
                 }
                 .padding(.horizontal, 20)
 
-                Button(action: {
-                    // Toggle continuous capture
-                    if isContinuousCapture {
-                        stopContinuousCapture()
-                    } else {
-                        startContinuousCapture()
-                    }
-                }) {
-                    Image(systemName: isContinuousCapture ? "stop.circle.fill" : "play.circle.fill")
-                        .font(.title)
-                        .padding()
-                        .foregroundColor(Color.white)
+                HStack(spacing: 12) {
+                    Button(action: {
+                        captureImageForAnalysis()
+                    }) {
+                        HStack(spacing: 8) {
+                            Image(systemName: "camera.fill")
+                                .font(.title3)
+                            Text("Take Photo")
+                                .font(.headline)
+                        }
+                        .padding(.horizontal, 18)
+                        .padding(.vertical, 14)
+                        .foregroundColor(.white)
                         .background(Color.black.opacity(0.6))
-                        .clipShape(Circle())
+                        .clipShape(Capsule())
+                    }
+                    .disabled(isAnalysisPending || isContinuousCapture)
+                    .opacity((isAnalysisPending || isContinuousCapture) ? 0.6 : 1.0)
+                    .accessibilityLabel("Take Photo")
+
+                    Button(action: {
+                        if isContinuousCapture {
+                            stopContinuousCapture()
+                        } else {
+                            startContinuousCapture()
+                        }
+                    }) {
+                        HStack(spacing: 8) {
+                            Image(systemName: isContinuousCapture ? "stop.circle.fill" : "play.circle.fill")
+                                .font(.title3)
+                            Text(isContinuousCapture ? "Stop" : "Start Continuous Mode")
+                                .font(.headline)
+                        }
+                        .padding(.horizontal, 18)
+                        .padding(.vertical, 14)
+                        .foregroundColor(.white)
+                        .background(Color.black.opacity(0.6))
+                        .clipShape(Capsule())
+                    }
+                    .accessibilityLabel(isContinuousCapture ? "Stop" : "Start Continuous Mode")
                 }
+                .padding(.horizontal, 20)
                 .padding(.bottom, 40)
             }
 
