@@ -38,10 +38,11 @@ Captures images from your camera, sends them to Moondream AI for analysis, and u
 
 ## Requirements
 
-- iOS 15.0+
+- iOS 18.0+
 - Xcode 14.0+
 - Moondream API key
 
 ## License
 
 MIT License - feel free to use this as a starting point for your own projects!
+
