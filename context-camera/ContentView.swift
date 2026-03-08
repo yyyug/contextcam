@@ -25,11 +25,18 @@ struct ContentView: View {
     @State private var showMessage = false
     @State private var displayText = ""
     @State private var captureState: CaptureState = .ready
+    @State private var showSettings = false
 
     // Sequential capture state
     @State private var isContinuousCapture = false
 
     @State private var translationRequest: CaptionTranslationRequest?
+    @AppStorage(CaptionLength.storageKey) private var oneShotCaptionLengthRawValue = CaptionLength.short.rawValue
+
+    private var oneShotCaptionLength: CaptionLength {
+        get { CaptionLength(rawValue: oneShotCaptionLengthRawValue) ?? .short }
+        nonmutating set { oneShotCaptionLengthRawValue = newValue.rawValue }
+    }
 
     func calculateBase64SizeInBytes(base64String: String) {
         let base64Length = base64String.count
@@ -38,23 +45,20 @@ struct ContentView: View {
         print("AI Analysis: Image size ~\(sizeInKiloBytes)KB")
     }
 
-    func sendImageForCaption(imageData: Data) {
+    func sendImageForCaption(imageData: Data, captionLength: CaptionLength) {
         isAnalysisPending = true
 
-        // Convert image data to base64
         let base64String = imageData.base64EncodedString()
         calculateBase64SizeInBytes(base64String: base64String)
 
-        // Create data URL for Moondream
         let dataURL = "data:image/jpeg;base64,\(base64String)"
 
-        MoondreamService.shared.generateCaption(for: dataURL) { result in
+        MoondreamService.shared.generateCaption(for: dataURL, length: captionLength) { result in
             DispatchQueue.main.async {
                 switch result {
                 case .success(let caption):
                     self.handleCaptionSuccess(caption)
 
-                    // Check for contexts using direct queries to Moondream
                     ContextManager.shared.checkForContexts(imageBase64: dataURL) { action in
                         DispatchQueue.main.async {
                             if let action = action {
@@ -63,10 +67,9 @@ struct ContentView: View {
                         }
                     }
 
-                    // Continue capturing if continuous mode is enabled
                     if self.isContinuousCapture {
                         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-                            self.captureImageForAnalysis()
+                            self.captureImageForAnalysis(captionLength: .short)
                         }
                     }
 
@@ -74,10 +77,9 @@ struct ContentView: View {
                     self.apiResponse = error.localizedDescription
                     self.isAnalysisPending = false
 
-                    // Continue capturing even on error if continuous mode is enabled
                     if self.isContinuousCapture {
                         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-                            self.captureImageForAnalysis()
+                            self.captureImageForAnalysis(captionLength: .short)
                         }
                     }
                 }
@@ -115,13 +117,11 @@ struct ContentView: View {
         translationRequest = nil
     }
 
-    /// Announces the latest caption so VoiceOver users hear the result immediately.
     private func announceCaptionForAccessibility(_ caption: String) {
         guard !caption.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         UIAccessibility.post(notification: .announcement, argument: caption)
     }
 
-    /// Trigger the visual feedback for detected actions
     private func triggerActionUI(actionText: String) {
         displayText = actionText
 
@@ -130,7 +130,6 @@ struct ContentView: View {
             showMessage = true
         }
 
-        // Auto-hide after delay
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
             withAnimation(.easeOut(duration: 0.5)) {
                 showGreenFlash = false
@@ -139,20 +138,16 @@ struct ContentView: View {
         }
     }
 
-    /// Start continuous sequential capture
     private func startContinuousCapture() {
         guard !isContinuousCapture else { return }
 
         isContinuousCapture = true
         captureState = .capturing
-
-        // Start the first capture
-        captureImageForAnalysis()
+        captureImageForAnalysis(captionLength: .short)
 
         print("Started continuous sequential capture")
     }
 
-    /// Stop continuous capture
     private func stopContinuousCapture() {
         isContinuousCapture = false
         captureState = .ready
@@ -160,9 +155,12 @@ struct ContentView: View {
         print("Stopped continuous capture")
     }
 
-    /// Capture a single image for AI analysis
-    private func captureImageForAnalysis() {
-        // Don't capture if already processing
+    private func takeSinglePhoto() {
+        guard !isContinuousCapture else { return }
+        captureImageForAnalysis(captionLength: oneShotCaptionLength)
+    }
+
+    private func captureImageForAnalysis(captionLength: CaptionLength) {
         guard !isAnalysisPending else {
             print("Skipping capture - analysis still pending")
             return
@@ -171,13 +169,12 @@ struct ContentView: View {
         cameraController?.capturePhoto { imageData in
             DispatchQueue.main.async {
                 if let imageData = imageData {
-                    self.sendImageForCaption(imageData: imageData)
+                    self.sendImageForCaption(imageData: imageData, captionLength: captionLength)
                 } else {
                     print("Failed to capture image")
-                    // Retry after a delay if in continuous mode
                     if self.isContinuousCapture {
                         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-                            self.captureImageForAnalysis()
+                            self.captureImageForAnalysis(captionLength: .short)
                         }
                     }
                 }
@@ -186,11 +183,10 @@ struct ContentView: View {
     }
 
     var body: some View {
-        ZStack {
+        ZStack(alignment: .topTrailing) {
             CameraCaptureView(cameraView: $cameraController, captureState: $captureState)
                 .edgesIgnoringSafeArea(.all)
 
-            // Success flashing UI
             if showGreenFlash {
                 Color.green.opacity(0.5)
                     .edgesIgnoringSafeArea(.all)
@@ -198,7 +194,6 @@ struct ContentView: View {
                     .zIndex(1)
             }
 
-            // Message display
             if showMessage {
                 VStack {
                     Text(displayText)
@@ -214,10 +209,30 @@ struct ContentView: View {
                 .transition(.scale.combined(with: .opacity))
             }
 
+            Button(action: {
+                showSettings = true
+            }) {
+                HStack(spacing: 8) {
+                    Image(systemName: "gearshape.fill")
+                        .font(.title3)
+                    Text("Settings")
+                        .font(.headline)
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+                .foregroundColor(.white)
+                .background(Color.black.opacity(0.6))
+                .clipShape(Capsule())
+            }
+            .disabled(isAnalysisPending || isContinuousCapture)
+            .opacity((isAnalysisPending || isContinuousCapture) ? 0.6 : 1.0)
+            .padding(.top, 24)
+            .padding(.trailing, 20)
+            .zIndex(3)
+
             VStack {
                 Spacer()
 
-                // AI Analysis Status
                 HStack {
                     VStack(alignment: .leading, spacing: 8) {
                         HStack {
@@ -230,7 +245,6 @@ struct ContentView: View {
                                 .foregroundColor(.white)
                         }
 
-                        // Current AI Response
                         if !apiResponse.isEmpty {
                             Text(apiResponse)
                                 .font(.system(size: 14, weight: .medium, design: .rounded))
@@ -249,7 +263,7 @@ struct ContentView: View {
 
                 HStack(spacing: 12) {
                     Button(action: {
-                        captureImageForAnalysis()
+                        takeSinglePhoto()
                     }) {
                         HStack(spacing: 8) {
                             Image(systemName: "camera.fill")
@@ -294,8 +308,10 @@ struct ContentView: View {
 
             captionTranslationView
         }
+        .fullScreenCover(isPresented: $showSettings) {
+            SettingsView(selectedCaptionLengthRawValue: $oneShotCaptionLengthRawValue)
+        }
         .onDisappear {
-            // Stop capture when view disappears
             stopContinuousCapture()
         }
     }
@@ -327,6 +343,45 @@ struct ContentView: View {
         #else
         EmptyView()
         #endif
+    }
+}
+
+private struct SettingsView: View {
+    @Environment(\.dismiss) private var dismiss
+    @Binding var selectedCaptionLengthRawValue: String
+
+    private var selectedCaptionLength: Binding<CaptionLength> {
+        Binding(
+            get: { CaptionLength(rawValue: selectedCaptionLengthRawValue) ?? .short },
+            set: { selectedCaptionLengthRawValue = $0.rawValue }
+        )
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Take Photo") {
+                    Picker("Caption Length", selection: selectedCaptionLength) {
+                        ForEach(CaptionLength.allCases) { length in
+                            Text(length.displayName).tag(length)
+                        }
+                    }
+
+                    Text("This setting applies to Take Photo only. Continuous mode always uses Short.")
+                        .font(.footnote)
+                        .foregroundColor(.secondary)
+                }
+            }
+            .navigationTitle("Settings")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") {
+                        dismiss()
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -362,7 +417,6 @@ private enum CaptionTranslationSupport {
     }
 }
 
-// Custom modifier to always show scroll indicators
 struct AlwaysShowScrollIndicators: ViewModifier {
     func body(content: Content) -> some View {
         content
