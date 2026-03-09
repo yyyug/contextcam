@@ -128,8 +128,14 @@ class MoondreamService {
     /// - Parameters:
     ///   - imageBase64: Base64 encoded image with data URL prefix
     ///   - question: Question to ask about the image
+    ///   - enforceSingleSentenceResponse: Whether to append a one-sentence response instruction
     ///   - completion: Completion handler with result
-    func queryImage(_ imageBase64: String, question: String, completion: @escaping (Result<String, MoondreamError>) -> Void) {
+    func queryImage(
+        _ imageBase64: String,
+        question: String,
+        enforceSingleSentenceResponse: Bool = true,
+        completion: @escaping (Result<String, MoondreamError>) -> Void
+    ) {
         guard Config.Moondream.isConfigured else {
             completion(.failure(.missingAPIKey))
             return
@@ -145,9 +151,13 @@ class MoondreamService {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue(Config.Moondream.apiKey, forHTTPHeaderField: "X-Moondream-Auth")
 
+        let formattedQuestion = enforceSingleSentenceResponse
+            ? question + " respond with one sentence"
+            : question
+
         let requestBody: [String: Any] = [
             "image_url": imageBase64,
-            "question": question + " respond with one sentence"
+            "question": formattedQuestion
         ]
 
         do {

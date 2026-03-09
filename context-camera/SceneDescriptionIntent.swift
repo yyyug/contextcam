@@ -26,7 +26,7 @@ struct ContextCamShortcutsProvider: AppShortcutsProvider {
             intent: OpenContextCamIntent(),
             phrases: [
                 "Describe with \(.applicationName)",
-                "\u{5FEB}\u{901F}\u{63CF}\u{8FF0} \(.applicationName)"
+                "\(.applicationName)\u{5FEB}\u{901F}\u{63CF}\u{8FF0}"
             ],
             shortTitle: "Quick Describe",
             systemImageName: "camera.viewfinder"

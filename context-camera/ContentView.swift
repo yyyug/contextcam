@@ -21,6 +21,11 @@ struct ContentView: View {
         case takePhoto
     }
 
+    private enum OneShotAnalysisRequest {
+        case caption(CaptionLength)
+        case query(QueryPhotoPreset)
+    }
+
     @StateObject private var contextManager = ContextManager.shared
     @State private var cameraController: CameraController?
     @State private var apiResponse = ""
@@ -53,6 +58,10 @@ struct ContentView: View {
         ContinuousCaptureInterval(rawValue: continuousCaptureIntervalRawValue) ?? .defaultInterval
     }
 
+    private var areOneShotActionsDisabled: Bool {
+        isAnalysisPending || isContinuousCapture
+    }
+
     func calculateBase64SizeInBytes(base64String: String) {
         let base64Length = base64String.count
         let sizeInBytes = (base64Length * 3) / 4
@@ -60,70 +69,113 @@ struct ContentView: View {
         print("AI Analysis: Image size ~\(sizeInKiloBytes)KB")
     }
 
-    func sendImageForCaption(imageData: Data, captionLength: CaptionLength) {
+    func sendImageForAnalysis(imageData: Data, request: OneShotAnalysisRequest) {
         isAnalysisPending = true
+        translationRequest = nil
 
         let base64String = imageData.base64EncodedString()
         calculateBase64SizeInBytes(base64String: base64String)
 
         let dataURL = "data:image/jpeg;base64,\(base64String)"
 
-        MoondreamService.shared.generateCaption(for: dataURL, length: captionLength) { result in
-            DispatchQueue.main.async {
-                switch result {
-                case .success(let caption):
-                    self.handleCaptionSuccess(caption)
-
-                    ContextManager.shared.checkForContexts(imageBase64: dataURL) { action in
-                        DispatchQueue.main.async {
-                            if let action = action {
-                                self.triggerActionUI(actionText: action.actionText)
-                            }
-                        }
-                    }
-
-                    self.scheduleNextContinuousCaptureIfNeeded()
-
-                case .failure(let error):
-                    self.apiResponse = error.localizedDescription
-                    self.isAnalysisPending = false
-                    self.scheduleNextContinuousCaptureIfNeeded()
+        switch request {
+        case .caption(let captionLength):
+            MoondreamService.shared.generateCaption(for: dataURL, length: captionLength) { result in
+                DispatchQueue.main.async {
+                    self.handleAnalysisResult(
+                        result,
+                        imageBase64: dataURL,
+                        shouldAttemptTranslation: true
+                    )
+                }
+            }
+        case .query(let preset):
+            MoondreamService.shared.queryImage(
+                dataURL,
+                question: preset.prompt,
+                enforceSingleSentenceResponse: false
+            ) { result in
+                DispatchQueue.main.async {
+                    self.handleAnalysisResult(
+                        result,
+                        imageBase64: dataURL,
+                        shouldAttemptTranslation: false
+                    )
                 }
             }
         }
     }
 
-    private func handleCaptionSuccess(_ caption: String) {
-        let trimmedCaption = caption.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        guard !trimmedCaption.isEmpty else {
-            apiResponse = ""
-            isAnalysisPending = false
-            return
-        }
-
-        #if canImport(Translation)
-        let targetLanguageIdentifier = selectedTranslationLanguageIdentifier.nilIfEmpty
-
-        if CaptionTranslationSupport.shouldAttemptTranslation(
-            for: trimmedCaption,
-            isTranslationEnabled: isCaptionTranslationEnabled,
-            targetLanguageIdentifier: targetLanguageIdentifier
-        ), let targetLanguageIdentifier {
-            translationRequest = CaptionTranslationRequest(
-                sourceText: trimmedCaption,
-                targetLanguageIdentifier: targetLanguageIdentifier
+    private func handleAnalysisResult(
+        _ result: Result<String, MoondreamError>,
+        imageBase64: String,
+        shouldAttemptTranslation: Bool
+    ) {
+        switch result {
+        case .success(let response):
+            handleAnalysisSuccess(
+                response,
+                imageBase64: imageBase64,
+                shouldAttemptTranslation: shouldAttemptTranslation
             )
-            return
+        case .failure(let error):
+            apiResponse = error.localizedDescription
+            isAnalysisPending = false
+            scheduleNextContinuousCaptureIfNeeded()
         }
-        #endif
-
-        presentCaption(trimmedCaption)
     }
 
-    private func presentCaption(_ caption: String) {
-        apiResponse = caption
-        announceCaptionForAccessibility(caption)
+    private func handleAnalysisSuccess(
+        _ response: String,
+        imageBase64: String,
+        shouldAttemptTranslation: Bool
+    ) {
+        let trimmedResponse = response.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard !trimmedResponse.isEmpty else {
+            apiResponse = ""
+            isAnalysisPending = false
+            scheduleNextContinuousCaptureIfNeeded()
+            return
+        }
+
+        if shouldAttemptTranslation {
+            #if canImport(Translation)
+            let targetLanguageIdentifier = selectedTranslationLanguageIdentifier.nilIfEmpty
+
+            if CaptionTranslationSupport.shouldAttemptTranslation(
+                for: trimmedResponse,
+                isTranslationEnabled: isCaptionTranslationEnabled,
+                targetLanguageIdentifier: targetLanguageIdentifier
+            ), let targetLanguageIdentifier {
+                translationRequest = CaptionTranslationRequest(
+                    sourceText: trimmedResponse,
+                    targetLanguageIdentifier: targetLanguageIdentifier
+                )
+            } else {
+                presentAnalysisResponse(trimmedResponse)
+            }
+            #else
+            presentAnalysisResponse(trimmedResponse)
+            #endif
+        } else {
+            presentAnalysisResponse(trimmedResponse)
+        }
+
+        ContextManager.shared.checkForContexts(imageBase64: imageBase64) { action in
+            DispatchQueue.main.async {
+                if let action = action {
+                    self.triggerActionUI(actionText: action.actionText)
+                }
+            }
+        }
+
+        scheduleNextContinuousCaptureIfNeeded()
+    }
+
+    private func presentAnalysisResponse(_ response: String) {
+        apiResponse = response
+        announceCaptionForAccessibility(response)
         isAnalysisPending = false
         translationRequest = nil
     }
@@ -154,7 +206,7 @@ struct ContentView: View {
 
         isContinuousCapture = true
         captureState = .capturing
-        captureImageForAnalysis(captionLength: .short)
+        captureImageForAnalysis(request: .caption(.short))
 
         print("Started continuous sequential capture")
     }
@@ -168,7 +220,12 @@ struct ContentView: View {
 
     private func takeSinglePhoto() {
         guard !isContinuousCapture else { return }
-        captureImageForAnalysis(captionLength: oneShotCaptionLength)
+        captureImageForAnalysis(request: .caption(oneShotCaptionLength))
+    }
+
+    private func takePresetPhoto(_ preset: QueryPhotoPreset) {
+        guard !isContinuousCapture else { return }
+        captureImageForAnalysis(request: .query(preset))
     }
 
     private func scheduleShortcutCaptureIfNeeded() {
@@ -220,12 +277,13 @@ struct ContentView: View {
             self.attemptShortcutCapture(remainingRetries: remainingRetries - 1)
         }
     }
+
     private func scheduleNextContinuousCaptureIfNeeded() {
         guard isContinuousCapture else { return }
 
         DispatchQueue.main.asyncAfter(deadline: .now() + continuousCaptureInterval.timeInterval) {
             guard self.isContinuousCapture else { return }
-            self.captureImageForAnalysis(captionLength: .short)
+            self.captureImageForAnalysis(request: .caption(.short))
         }
     }
 
@@ -234,7 +292,7 @@ struct ContentView: View {
         takeSinglePhoto()
     }
 
-    private func captureImageForAnalysis(captionLength: CaptionLength) {
+    private func captureImageForAnalysis(request: OneShotAnalysisRequest) {
         guard !isAnalysisPending else {
             print("Skipping capture - analysis still pending")
             return
@@ -243,7 +301,7 @@ struct ContentView: View {
         cameraController?.capturePhoto { imageData in
             DispatchQueue.main.async {
                 if let imageData = imageData {
-                    self.sendImageForCaption(imageData: imageData, captionLength: captionLength)
+                    self.sendImageForAnalysis(imageData: imageData, request: request)
                 } else {
                     print("Failed to capture image")
                     self.scheduleNextContinuousCaptureIfNeeded()
@@ -293,8 +351,8 @@ struct ContentView: View {
                 .background(Color.black.opacity(0.6))
                 .clipShape(Capsule())
             }
-            .disabled(isAnalysisPending || isContinuousCapture)
-            .opacity((isAnalysisPending || isContinuousCapture) ? 0.6 : 1.0)
+            .disabled(areOneShotActionsDisabled)
+            .opacity(areOneShotActionsDisabled ? 0.6 : 1.0)
             .padding(.top, 24)
             .padding(.trailing, 20)
             .zIndex(3)
@@ -320,47 +378,74 @@ struct ContentView: View {
                 }
                 .padding(.horizontal, 20)
 
-                HStack(spacing: 12) {
-                    Button(action: {
-                        takeSinglePhoto()
-                    }) {
-                        HStack(spacing: 8) {
-                            Image(systemName: "camera.fill")
-                                .font(.title3)
-                            Text("Take Photo")
-                                .font(.headline)
+                VStack(spacing: 12) {
+                    HStack(spacing: 12) {
+                        Button(action: {
+                            takeSinglePhoto()
+                        }) {
+                            HStack(spacing: 8) {
+                                Image(systemName: "camera.fill")
+                                    .font(.title3)
+                                Text("Take Photo")
+                                    .font(.headline)
+                            }
+                            .padding(.horizontal, 18)
+                            .padding(.vertical, 14)
+                            .foregroundColor(.white)
+                            .background(Color.black.opacity(0.6))
+                            .clipShape(Capsule())
                         }
-                        .padding(.horizontal, 18)
-                        .padding(.vertical, 14)
-                        .foregroundColor(.white)
-                        .background(Color.black.opacity(0.6))
-                        .clipShape(Capsule())
-                    }
-                    .disabled(isAnalysisPending || isContinuousCapture)
-                    .opacity((isAnalysisPending || isContinuousCapture) ? 0.6 : 1.0)
-                    .accessibilityLabel("Take Photo")
-                    .accessibilityFocused($focusedControl, equals: .takePhoto)
+                        .disabled(areOneShotActionsDisabled)
+                        .opacity(areOneShotActionsDisabled ? 0.6 : 1.0)
+                        .accessibilityLabel("Take Photo")
+                        .accessibilityFocused($focusedControl, equals: .takePhoto)
 
-                    Button(action: {
-                        if isContinuousCapture {
-                            stopContinuousCapture()
-                        } else {
-                            startContinuousCapture()
+                        Button(action: {
+                            if isContinuousCapture {
+                                stopContinuousCapture()
+                            } else {
+                                startContinuousCapture()
+                            }
+                        }) {
+                            HStack(spacing: 8) {
+                                Image(systemName: isContinuousCapture ? "stop.circle.fill" : "play.circle.fill")
+                                    .font(.title3)
+                                Text(isContinuousCapture ? "Stop" : "Start Continuous Mode")
+                                    .font(.headline)
+                            }
+                            .padding(.horizontal, 18)
+                            .padding(.vertical, 14)
+                            .foregroundColor(.white)
+                            .background(Color.black.opacity(0.6))
+                            .clipShape(Capsule())
                         }
-                    }) {
-                        HStack(spacing: 8) {
-                            Image(systemName: isContinuousCapture ? "stop.circle.fill" : "play.circle.fill")
-                                .font(.title3)
-                            Text(isContinuousCapture ? "Stop" : "Start Continuous Mode")
-                                .font(.headline)
-                        }
-                        .padding(.horizontal, 18)
-                        .padding(.vertical, 14)
-                        .foregroundColor(.white)
-                        .background(Color.black.opacity(0.6))
-                        .clipShape(Capsule())
+                        .accessibilityLabel(isContinuousCapture ? "Stop" : "Start Continuous Mode")
                     }
-                    .accessibilityLabel(isContinuousCapture ? "Stop" : "Start Continuous Mode")
+
+                    HStack(spacing: 12) {
+                        ForEach(QueryPhotoPreset.allCases) { preset in
+                            Button(action: {
+                                takePresetPhoto(preset)
+                            }) {
+                                VStack(spacing: 6) {
+                                    Image(systemName: preset.systemImageName)
+                                        .font(.title3)
+                                    Text(preset.title)
+                                        .font(.subheadline.weight(.semibold))
+                                        .multilineTextAlignment(.center)
+                                }
+                                .frame(maxWidth: .infinity)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 14)
+                                .foregroundColor(.white)
+                                .background(Color.black.opacity(0.6))
+                                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                            }
+                            .disabled(areOneShotActionsDisabled)
+                            .opacity(areOneShotActionsDisabled ? 0.6 : 1.0)
+                            .accessibilityLabel(preset.title)
+                        }
+                    }
                 }
                 .padding(.horizontal, 20)
                 .padding(.bottom, 40)
@@ -419,12 +504,12 @@ struct ContentView: View {
                         await MainActor.run {
                             guard translationRequest?.id == request.id else { return }
                             let translatedCaption = response.targetText.trimmingCharacters(in: .whitespacesAndNewlines)
-                            presentCaption(translatedCaption.isEmpty ? request.sourceText : translatedCaption)
+                            presentAnalysisResponse(translatedCaption.isEmpty ? request.sourceText : translatedCaption)
                         }
                     } catch {
                         await MainActor.run {
                             guard translationRequest?.id == request.id else { return }
-                            presentCaption(request.sourceText)
+                            presentAnalysisResponse(request.sourceText)
                         }
                     }
                 }
@@ -655,6 +740,47 @@ private enum ContinuousCaptureInterval: Double, CaseIterable, Identifiable {
             return "1 minute"
         case .twoMinutes:
             return "2 minutes"
+        }
+    }
+}
+
+private enum QueryPhotoPreset: String, CaseIterable, Identifiable {
+    case product
+    case dish
+    case shortText
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .product:
+            return "Product"
+        case .dish:
+            return "Dish"
+        case .shortText:
+            return "Short Text"
+        }
+    }
+
+    var prompt: String {
+        switch self {
+        case .product:
+            return "Describe the main product in this image, including its brand, model, and primary function"
+        case .dish:
+            return "Describe the layout of the food on the plate or tray. Use clock positions or spatial terms"
+        case .shortText:
+            return "Extract all alphanumeric codes and text visible in the image, such as labels like 'A', '3-2', or '62k'"
+        }
+    }
+
+    var systemImageName: String {
+        switch self {
+        case .product:
+            return "shippingbox.fill"
+        case .dish:
+            return "fork.knife.circle.fill"
+        case .shortText:
+            return "text.magnifyingglass"
         }
     }
 }
