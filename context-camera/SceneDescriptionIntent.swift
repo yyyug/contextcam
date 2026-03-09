@@ -22,16 +22,14 @@ struct OpenContextCamIntent: AppIntent {
 
 struct ContextCamShortcutsProvider: AppShortcutsProvider {
     static var appShortcuts: [AppShortcut] {
-        [
-            AppShortcut(
-                intent: OpenContextCamIntent(),
-                phrases: [
-                    "Describe with \(.applicationName)",
-                    "\u{5FEB}\u{901F}\u{63CF}\u{8FF0}"
-                ],
-                shortTitle: "Quick Describe",
-                systemImageName: "camera.viewfinder"
-            )
-        ]
+        AppShortcut(
+            intent: OpenContextCamIntent(),
+            phrases: [
+                "Describe with \(.applicationName)",
+                "\u{5FEB}\u{901F}\u{63CF}\u{8FF0}"
+            ],
+            shortTitle: "Quick Describe",
+            systemImageName: "camera.viewfinder"
+        )
     }
 }
