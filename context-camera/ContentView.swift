@@ -38,12 +38,17 @@ struct ContentView: View {
     @State private var translationRequest: CaptionTranslationRequest?
     @AccessibilityFocusState private var focusedControl: FocusedControl?
     @AppStorage(CaptionLength.storageKey) private var oneShotCaptionLengthRawValue = CaptionLength.short.rawValue
+    @AppStorage(ContinuousCaptureInterval.storageKey) private var continuousCaptureIntervalRawValue = ContinuousCaptureInterval.defaultInterval.rawValue
     @AppStorage(CaptionTranslationSettings.isEnabledStorageKey) private var isCaptionTranslationEnabled = false
     @AppStorage(CaptionTranslationSettings.targetLanguageStorageKey) private var selectedTranslationLanguageIdentifier = ""
 
     private var oneShotCaptionLength: CaptionLength {
         get { CaptionLength(rawValue: oneShotCaptionLengthRawValue) ?? .short }
         nonmutating set { oneShotCaptionLengthRawValue = newValue.rawValue }
+    }
+
+    private var continuousCaptureInterval: ContinuousCaptureInterval {
+        ContinuousCaptureInterval(rawValue: continuousCaptureIntervalRawValue) ?? .defaultInterval
     }
 
     func calculateBase64SizeInBytes(base64String: String) {
@@ -75,21 +80,12 @@ struct ContentView: View {
                         }
                     }
 
-                    if self.isContinuousCapture {
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-                            self.captureImageForAnalysis(captionLength: .short)
-                        }
-                    }
+                    self.scheduleNextContinuousCaptureIfNeeded()
 
                 case .failure(let error):
                     self.apiResponse = error.localizedDescription
                     self.isAnalysisPending = false
-
-                    if self.isContinuousCapture {
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-                            self.captureImageForAnalysis(captionLength: .short)
-                        }
-                    }
+                    self.scheduleNextContinuousCaptureIfNeeded()
                 }
             }
         }
@@ -173,6 +169,15 @@ struct ContentView: View {
         captureImageForAnalysis(captionLength: oneShotCaptionLength)
     }
 
+    private func scheduleNextContinuousCaptureIfNeeded() {
+        guard isContinuousCapture else { return }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + continuousCaptureInterval.timeInterval) {
+            guard self.isContinuousCapture else { return }
+            self.captureImageForAnalysis(captionLength: .short)
+        }
+    }
+
     private func handleHardwareCaptureEvent(_ event: AVCaptureEvent) {
         guard event.phase == .ended else { return }
         takeSinglePhoto()
@@ -190,11 +195,7 @@ struct ContentView: View {
                     self.sendImageForCaption(imageData: imageData, captionLength: captionLength)
                 } else {
                     print("Failed to capture image")
-                    if self.isContinuousCapture {
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-                            self.captureImageForAnalysis(captionLength: .short)
-                        }
-                    }
+                    self.scheduleNextContinuousCaptureIfNeeded()
                 }
             }
         }
@@ -319,6 +320,7 @@ struct ContentView: View {
         .fullScreenCover(isPresented: $showSettings) {
             SettingsView(
                 selectedCaptionLengthRawValue: $oneShotCaptionLengthRawValue,
+                continuousCaptureIntervalRawValue: $continuousCaptureIntervalRawValue,
                 isCaptionTranslationEnabled: $isCaptionTranslationEnabled,
                 selectedTranslationLanguageIdentifier: $selectedTranslationLanguageIdentifier
             )
@@ -381,6 +383,7 @@ struct ContentView: View {
 private struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @Binding var selectedCaptionLengthRawValue: String
+    @Binding var continuousCaptureIntervalRawValue: Double
     @Binding var isCaptionTranslationEnabled: Bool
     @Binding var selectedTranslationLanguageIdentifier: String
 
@@ -395,6 +398,13 @@ private struct SettingsView: View {
         )
     }
 
+    private var selectedContinuousCaptureInterval: Binding<ContinuousCaptureInterval> {
+        Binding(
+            get: { ContinuousCaptureInterval(rawValue: continuousCaptureIntervalRawValue) ?? .defaultInterval },
+            set: { continuousCaptureIntervalRawValue = $0.rawValue }
+        )
+    }
+
     var body: some View {
         NavigationStack {
             Form {
@@ -405,7 +415,19 @@ private struct SettingsView: View {
                         }
                     }
 
-                    Text("This setting applies to Take Photo only. Continuous mode always uses Short.")
+                    Text("This setting applies to Take Photo only. Continuous mode uses the short caption style.")
+                        .font(.footnote)
+                        .foregroundColor(.secondary)
+                }
+
+                Section("Continuous Mode") {
+                    Picker("Capture Frequency", selection: selectedContinuousCaptureInterval) {
+                        ForEach(ContinuousCaptureInterval.allCases) { interval in
+                            Text(interval.displayName).tag(interval)
+                        }
+                    }
+
+                    Text("Choose how often Continuous Mode takes a picture. Each completed result is announced when available.")
                         .font(.footnote)
                         .foregroundColor(.secondary)
                 }
@@ -542,6 +564,45 @@ enum CaptionTranslationSupport {
 private enum CaptionTranslationSettings {
     static let isEnabledStorageKey = "captionTranslationEnabled"
     static let targetLanguageStorageKey = "captionTranslationTargetLanguage"
+}
+
+private enum ContinuousCaptureInterval: Double, CaseIterable, Identifiable {
+    case oneSecond = 1
+    case twoSeconds = 2
+    case threeSeconds = 3
+    case fiveSeconds = 5
+    case tenSeconds = 10
+    case thirtySeconds = 30
+    case oneMinute = 60
+    case twoMinutes = 120
+
+    static let storageKey = "continuousCaptureInterval"
+    static let defaultInterval: Self = .threeSeconds
+
+    var id: Double { rawValue }
+
+    var timeInterval: TimeInterval { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .oneSecond:
+            return "1 second"
+        case .twoSeconds:
+            return "2 seconds"
+        case .threeSeconds:
+            return "3 seconds"
+        case .fiveSeconds:
+            return "5 seconds"
+        case .tenSeconds:
+            return "10 seconds"
+        case .thirtySeconds:
+            return "30 seconds"
+        case .oneMinute:
+            return "1 minute"
+        case .twoMinutes:
+            return "2 minutes"
+        }
+    }
 }
 
 private extension String {
