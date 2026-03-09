@@ -69,7 +69,7 @@ struct ContentView: View {
         print("AI Analysis: Image size ~\(sizeInKiloBytes)KB")
     }
 
-    func sendImageForAnalysis(imageData: Data, request: OneShotAnalysisRequest) {
+    private func sendImageForAnalysis(imageData: Data, request: OneShotAnalysisRequest) {
         isAnalysisPending = true
         translationRequest = nil
 
@@ -863,3 +863,4 @@ struct ContentView_Previews: PreviewProvider {
         ContentView()
     }
 }
+
