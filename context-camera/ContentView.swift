@@ -9,6 +9,7 @@ import SwiftUI
 import UIKit
 import Foundation
 import NaturalLanguage
+import AVKit
 
 #if canImport(Translation)
 import Translation
@@ -172,6 +173,11 @@ struct ContentView: View {
         captureImageForAnalysis(captionLength: oneShotCaptionLength)
     }
 
+    private func handleHardwareCaptureEvent(_ event: AVCaptureEvent) {
+        guard event.phase == .ended else { return }
+        takeSinglePhoto()
+    }
+
     private func captureImageForAnalysis(captionLength: CaptionLength) {
         guard !isAnalysisPending else {
             print("Skipping capture - analysis still pending")
@@ -196,8 +202,7 @@ struct ContentView: View {
 
     var body: some View {
         ZStack(alignment: .topTrailing) {
-            CameraCaptureView(cameraView: $cameraController, captureState: $captureState)
-                .edgesIgnoringSafeArea(.all)
+            cameraPreview
 
             if showGreenFlash {
                 Color.green.opacity(0.5)
@@ -326,6 +331,20 @@ struct ContentView: View {
         }
         .onDisappear {
             stopContinuousCapture()
+        }
+    }
+
+    @ViewBuilder
+    private var cameraPreview: some View {
+        let preview = CameraCaptureView(cameraView: $cameraController, captureState: $captureState)
+            .edgesIgnoringSafeArea(.all)
+
+        if #available(iOS 26.0, *) {
+            preview.onCameraCaptureEvent(isEnabled: !isAnalysisPending && !isContinuousCapture) { event in
+                handleHardwareCaptureEvent(event)
+            }
+        } else {
+            preview
         }
     }
 
