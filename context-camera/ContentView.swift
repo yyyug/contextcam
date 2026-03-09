@@ -15,6 +15,10 @@ import Translation
 #endif
 
 struct ContentView: View {
+    private enum FocusedControl: Hashable {
+        case takePhoto
+    }
+
     @StateObject private var contextManager = ContextManager.shared
     @State private var cameraController: CameraController?
     @State private var apiResponse = ""
@@ -31,6 +35,7 @@ struct ContentView: View {
     @State private var isContinuousCapture = false
 
     @State private var translationRequest: CaptionTranslationRequest?
+    @AccessibilityFocusState private var focusedControl: FocusedControl?
     @AppStorage(CaptionLength.storageKey) private var oneShotCaptionLengthRawValue = CaptionLength.short.rawValue
     @AppStorage(CaptionTranslationSettings.isEnabledStorageKey) private var isCaptionTranslationEnabled = false
     @AppStorage(CaptionTranslationSettings.targetLanguageStorageKey) private var selectedTranslationLanguageIdentifier = ""
@@ -242,16 +247,6 @@ struct ContentView: View {
 
                 HStack {
                     VStack(alignment: .leading, spacing: 8) {
-                        HStack {
-                            Circle()
-                                .fill(isAnalysisPending ? Color.orange : (isContinuousCapture ? Color.green : Color.gray))
-                                .frame(width: 12, height: 12)
-
-                            Text(isAnalysisPending ? "Analyzing..." : (isContinuousCapture ? "Live Capture" : "Stopped"))
-                                .font(.caption)
-                                .foregroundColor(.white)
-                        }
-
                         if !apiResponse.isEmpty {
                             Text(apiResponse)
                                 .font(.system(size: 14, weight: .medium, design: .rounded))
@@ -287,6 +282,7 @@ struct ContentView: View {
                     .disabled(isAnalysisPending || isContinuousCapture)
                     .opacity((isAnalysisPending || isContinuousCapture) ? 0.6 : 1.0)
                     .accessibilityLabel("Take Photo")
+                    .accessibilityFocused($focusedControl, equals: .takePhoto)
 
                     Button(action: {
                         if isContinuousCapture {
@@ -321,6 +317,12 @@ struct ContentView: View {
                 isCaptionTranslationEnabled: $isCaptionTranslationEnabled,
                 selectedTranslationLanguageIdentifier: $selectedTranslationLanguageIdentifier
             )
+        }
+        .onAppear {
+            guard UIAccessibility.isVoiceOverRunning else { return }
+            DispatchQueue.main.async {
+                focusedControl = .takePhoto
+            }
         }
         .onDisappear {
             stopContinuousCapture()
