@@ -32,6 +32,8 @@ struct ContentView: View {
 
     @State private var translationRequest: CaptionTranslationRequest?
     @AppStorage(CaptionLength.storageKey) private var oneShotCaptionLengthRawValue = CaptionLength.short.rawValue
+    @AppStorage(CaptionTranslationSettings.isEnabledStorageKey) private var isCaptionTranslationEnabled = false
+    @AppStorage(CaptionTranslationSettings.targetLanguageStorageKey) private var selectedTranslationLanguageIdentifier = ""
 
     private var oneShotCaptionLength: CaptionLength {
         get { CaptionLength(rawValue: oneShotCaptionLengthRawValue) ?? .short }
@@ -97,8 +99,13 @@ struct ContentView: View {
         }
 
         #if canImport(Translation)
-        if CaptionTranslationSupport.shouldAttemptTranslation(for: trimmedCaption),
-           let targetLanguageIdentifier = CaptionTranslationSupport.preferredTargetLanguage() {
+        let targetLanguageIdentifier = selectedTranslationLanguageIdentifier.nilIfEmpty
+
+        if CaptionTranslationSupport.shouldAttemptTranslation(
+            for: trimmedCaption,
+            isTranslationEnabled: isCaptionTranslationEnabled,
+            targetLanguageIdentifier: targetLanguageIdentifier
+        ), let targetLanguageIdentifier {
             translationRequest = CaptionTranslationRequest(
                 sourceText: trimmedCaption,
                 targetLanguageIdentifier: targetLanguageIdentifier
@@ -309,7 +316,11 @@ struct ContentView: View {
             captionTranslationView
         }
         .fullScreenCover(isPresented: $showSettings) {
-            SettingsView(selectedCaptionLengthRawValue: $oneShotCaptionLengthRawValue)
+            SettingsView(
+                selectedCaptionLengthRawValue: $oneShotCaptionLengthRawValue,
+                isCaptionTranslationEnabled: $isCaptionTranslationEnabled,
+                selectedTranslationLanguageIdentifier: $selectedTranslationLanguageIdentifier
+            )
         }
         .onDisappear {
             stopContinuousCapture()
@@ -349,6 +360,12 @@ struct ContentView: View {
 private struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @Binding var selectedCaptionLengthRawValue: String
+    @Binding var isCaptionTranslationEnabled: Bool
+    @Binding var selectedTranslationLanguageIdentifier: String
+
+    #if canImport(Translation)
+    @StateObject private var translationLanguageStore = TranslationLanguageStore()
+    #endif
 
     private var selectedCaptionLength: Binding<CaptionLength> {
         Binding(
@@ -371,6 +388,8 @@ private struct SettingsView: View {
                         .font(.footnote)
                         .foregroundColor(.secondary)
                 }
+
+                translationSection
             }
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
@@ -381,8 +400,89 @@ private struct SettingsView: View {
                     }
                 }
             }
+            #if canImport(Translation)
+            .task {
+                await translationLanguageStore.loadLanguages()
+                refreshSelectedLanguageIfNeeded()
+            }
+            .onReceive(translationLanguageStore.$availableLanguages) { _ in
+                refreshSelectedLanguageIfNeeded()
+            }
+            #endif
         }
     }
+
+    @ViewBuilder
+    private var translationSection: some View {
+        #if canImport(Translation)
+        Section("Translation") {
+            Toggle("Enable Translation", isOn: $isCaptionTranslationEnabled)
+                .disabled(!translationLanguageStore.hasAvailableLanguages)
+
+            if translationLanguageStore.isLoading {
+                LabeledContent("Target Language") {
+                    Text("Loading available languages...")
+                        .foregroundColor(.secondary)
+                }
+            } else if let errorMessage = translationLanguageStore.errorMessage {
+                Text(errorMessage)
+                    .font(.footnote)
+                    .foregroundColor(.secondary)
+            } else if translationLanguageStore.availableLanguages.isEmpty {
+                Text("No translation languages are currently available on this device.")
+                    .font(.footnote)
+                    .foregroundColor(.secondary)
+            } else {
+                Picker("Target Language", selection: $selectedTranslationLanguageIdentifier) {
+                    Text("Choose a language").tag("")
+
+                    ForEach(translationLanguageStore.availableLanguages) { language in
+                        Text(language.displayName).tag(language.identifier)
+                    }
+                }
+                .disabled(!isCaptionTranslationEnabled)
+            }
+
+            Text("Translate captions into the language you choose below.")
+                .font(.footnote)
+                .foregroundColor(.secondary)
+
+            Text("Only languages available from Apple Translation are shown.")
+                .font(.footnote)
+                .foregroundColor(.secondary)
+        }
+        #else
+        Section("Translation") {
+            Text("Translation is unavailable on this device.")
+                .font(.footnote)
+                .foregroundColor(.secondary)
+        }
+        #endif
+    }
+
+    #if canImport(Translation)
+    private func refreshSelectedLanguageIfNeeded() {
+        guard !translationLanguageStore.isLoading else { return }
+
+        if translationLanguageStore.availableLanguages.isEmpty {
+            selectedTranslationLanguageIdentifier = ""
+            isCaptionTranslationEnabled = false
+            return
+        }
+
+        if selectedTranslationLanguageIdentifier.isEmpty {
+            return
+        }
+
+        let selectedLanguageStillAvailable = translationLanguageStore.availableLanguages.contains {
+            $0.identifier == selectedTranslationLanguageIdentifier
+        }
+
+        if !selectedLanguageStillAvailable {
+            selectedTranslationLanguageIdentifier = ""
+        }
+    }
+    #endif
 }
 
 #if canImport(Translation)
@@ -400,22 +500,92 @@ private struct CaptionTranslationRequest: Equatable {
 }
 #endif
 
-private enum CaptionTranslationSupport {
-    static func preferredTargetLanguage() -> String? {
-        Locale.preferredLanguages.first
-    }
-
-    static func shouldAttemptTranslation(for caption: String) -> Bool {
+enum CaptionTranslationSupport {
+    static func shouldAttemptTranslation(
+        for caption: String,
+        isTranslationEnabled: Bool,
+        targetLanguageIdentifier: String?
+    ) -> Bool {
         let trimmedCaption = caption.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedCaption.isEmpty else { return false }
-        guard let targetLanguage = preferredTargetLanguage() else { return false }
+        guard isTranslationEnabled else { return false }
+        guard let targetLanguageIdentifier, !targetLanguageIdentifier.isEmpty else { return false }
 
-        let targetCode = Locale(identifier: targetLanguage).language.languageCode?.identifier.lowercased()
+        let targetCode = Locale(identifier: targetLanguageIdentifier).language.languageCode?.identifier.lowercased()
         let sourceCode = Locale(identifier: NLLanguageRecognizer.dominantLanguage(for: trimmedCaption)?.rawValue ?? "").language.languageCode?.identifier.lowercased()
 
         return targetCode != nil && targetCode != sourceCode
     }
 }
+
+private enum CaptionTranslationSettings {
+    static let isEnabledStorageKey = "captionTranslationEnabled"
+    static let targetLanguageStorageKey = "captionTranslationTargetLanguage"
+}
+
+private extension String {
+    var nilIfEmpty: String? {
+        isEmpty ? nil : self
+    }
+}
+
+#if canImport(Translation)
+@MainActor
+private final class TranslationLanguageStore: ObservableObject {
+    @Published private(set) var availableLanguages: [TranslationLanguageOption] = []
+    @Published private(set) var isLoading = false
+    @Published private(set) var errorMessage: String?
+
+    var hasAvailableLanguages: Bool {
+        !availableLanguages.isEmpty
+    }
+
+    func loadLanguages() async {
+        guard availableLanguages.isEmpty, !isLoading else { return }
+
+        isLoading = true
+        errorMessage = nil
+
+        do {
+            let supportedLanguages = try await LanguageAvailability().supportedLanguages
+            availableLanguages = supportedLanguages
+                .map(TranslationLanguageOption.init)
+                .sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
+        } catch {
+            errorMessage = "Unable to load translation languages right now."
+            availableLanguages = []
+        }
+
+        isLoading = false
+    }
+}
+
+private struct TranslationLanguageOption: Identifiable, Equatable {
+    let language: Locale.Language
+
+    var id: String { identifier }
+
+    var identifier: String {
+        if !language.maximalIdentifier.isEmpty {
+            return language.maximalIdentifier
+        }
+
+        if !language.minimalIdentifier.isEmpty {
+            return language.minimalIdentifier
+        }
+
+        return String(describing: language)
+    }
+
+    var displayName: String {
+        if let localizedName = Locale.current.localizedString(forIdentifier: identifier), !localizedName.isEmpty {
+            return localizedName
+        }
+
+        return identifier
+    }
+}
+#endif
 
 struct AlwaysShowScrollIndicators: ViewModifier {
     func body(content: Content) -> some View {
