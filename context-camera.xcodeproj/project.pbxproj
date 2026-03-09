@@ -19,6 +19,8 @@
 		9090F3272B69682500DE0D6F /* AIImageCaptureController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9090F3262B69682500DE0D6F /* AIImageCaptureController.swift */; };
 		ConfigBuild123456789012 /* Config.swift in Sources */ = {isa = PBXBuildFile; fileRef = Config123456789012345678 /* Config.swift */; };
 		ServiceBuild123456789012 /* MoondreamService.swift in Sources */ = {isa = PBXBuildFile; fileRef = Service123456789012345678 /* MoondreamService.swift */; };
+		IntentBuild123456789012 /* SceneDescriptionIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = Intent123456789012345678 /* SceneDescriptionIntent.swift */; };
+		ShortcutBuild123456789012 /* ShortcutLaunchManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = Shortcut123456789012345678 /* ShortcutLaunchManager.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -55,6 +57,8 @@
 		9090F32B2B69825600DE0D6F /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		Config123456789012345678 /* Config.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Config.swift; sourceTree = "<group>"; };
 		Service123456789012345678 /* MoondreamService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MoondreamService.swift; sourceTree = "<group>"; };
+		Intent123456789012345678 /* SceneDescriptionIntent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SceneDescriptionIntent.swift; sourceTree = "<group>"; };
+		Shortcut123456789012345678 /* ShortcutLaunchManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShortcutLaunchManager.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -113,6 +117,8 @@
 				9090F3262B69682500DE0D6F /* AIImageCaptureController.swift */,
 				Config123456789012345678 /* Config.swift */,
 				Service123456789012345678 /* MoondreamService.swift */,
+				Intent123456789012345678 /* SceneDescriptionIntent.swift */,
+				Shortcut123456789012345678 /* ShortcutLaunchManager.swift */,
 				9090F2FB2B68A7AD00DE0D6F /* Assets.xcassets */,
 				9090F2FD2B68A7AD00DE0D6F /* Preview Content */,
 			);
@@ -285,6 +291,8 @@
 				9090F2F62B68A7AC00DE0D6F /* AppDelegate.swift in Sources */,
 				ConfigBuild123456789012 /* Config.swift in Sources */,
 				ServiceBuild123456789012 /* MoondreamService.swift in Sources */,
+				IntentBuild123456789012 /* SceneDescriptionIntent.swift in Sources */,
+				ShortcutBuild123456789012 /* ShortcutLaunchManager.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -449,7 +457,8 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "context-camera/Info.plist";
-				INFOPLIST_KEY_NSCameraUsageDescription = "";
+				INFOPLIST_KEY_CFBundleDisplayName = ContextCam;
+				INFOPLIST_KEY_NSCameraUsageDescription = "ContextCam uses the camera to capture a photo and describe what is in front of you.";
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UIRequiredDeviceCapabilities = arkit;
@@ -481,7 +490,8 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "context-camera/Info.plist";
-				INFOPLIST_KEY_NSCameraUsageDescription = "";
+				INFOPLIST_KEY_CFBundleDisplayName = ContextCam;
+				INFOPLIST_KEY_NSCameraUsageDescription = "ContextCam uses the camera to capture a photo and describe what is in front of you.";
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UIRequiredDeviceCapabilities = arkit;
@@ -627,4 +637,3 @@
 	};
 	rootObject = 9090F2EA2B68A7AC00DE0D6F /* Project object */;
 }
-

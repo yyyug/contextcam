@@ -10,6 +10,7 @@ import UIKit
 import Foundation
 import NaturalLanguage
 import AVKit
+import AVFoundation
 
 #if canImport(Translation)
 import Translation
@@ -34,6 +35,7 @@ struct ContentView: View {
 
     // Sequential capture state
     @State private var isContinuousCapture = false
+    @State private var isWaitingForShortcutCapture = false
 
     @State private var translationRequest: CaptionTranslationRequest?
     @AccessibilityFocusState private var focusedControl: FocusedControl?
@@ -169,6 +171,55 @@ struct ContentView: View {
         captureImageForAnalysis(captionLength: oneShotCaptionLength)
     }
 
+    private func scheduleShortcutCaptureIfNeeded() {
+        guard ShortcutLaunchManager.hasPendingCaptureRequest() else { return }
+        guard !isWaitingForShortcutCapture else { return }
+
+        isWaitingForShortcutCapture = true
+        attemptShortcutCapture(remainingRetries: 20)
+    }
+
+    private func attemptShortcutCapture(remainingRetries: Int) {
+        guard ShortcutLaunchManager.hasPendingCaptureRequest() else {
+            isWaitingForShortcutCapture = false
+            return
+        }
+
+        let authorizationStatus = AVCaptureDevice.authorizationStatus(for: .video)
+        if authorizationStatus == .denied || authorizationStatus == .restricted {
+            ShortcutLaunchManager.consumePendingCaptureRequest()
+            apiResponse = "Camera access is required to describe the scene."
+            isWaitingForShortcutCapture = false
+            return
+        }
+
+        guard !isContinuousCapture, !isAnalysisPending else {
+            retryShortcutCapture(remainingRetries: remainingRetries)
+            return
+        }
+
+        guard let cameraController, cameraController.isReady else {
+            retryShortcutCapture(remainingRetries: remainingRetries)
+            return
+        }
+
+        ShortcutLaunchManager.consumePendingCaptureRequest()
+        isWaitingForShortcutCapture = false
+        takeSinglePhoto()
+    }
+
+    private func retryShortcutCapture(remainingRetries: Int) {
+        guard remainingRetries > 0 else {
+            ShortcutLaunchManager.consumePendingCaptureRequest()
+            apiResponse = "Camera is still getting ready. Please try again."
+            isWaitingForShortcutCapture = false
+            return
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+            self.attemptShortcutCapture(remainingRetries: remainingRetries - 1)
+        }
+    }
     private func scheduleNextContinuousCaptureIfNeeded() {
         guard isContinuousCapture else { return }
 
@@ -326,10 +377,16 @@ struct ContentView: View {
             )
         }
         .onAppear {
-            guard UIAccessibility.isVoiceOverRunning else { return }
-            DispatchQueue.main.async {
-                focusedControl = .takePhoto
+            if UIAccessibility.isVoiceOverRunning {
+                DispatchQueue.main.async {
+                    focusedControl = .takePhoto
+                }
             }
+
+            scheduleShortcutCaptureIfNeeded()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
+            scheduleShortcutCaptureIfNeeded()
         }
         .onDisappear {
             stopContinuousCapture()

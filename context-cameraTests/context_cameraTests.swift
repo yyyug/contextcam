@@ -58,6 +58,17 @@ final class context_cameraTests: XCTestCase {
         )
     }
 
+    func testShortcutLaunchManagerTracksPendingCapture() {
+        ShortcutLaunchManager.consumePendingCaptureRequest()
+        XCTAssertFalse(ShortcutLaunchManager.hasPendingCaptureRequest())
+
+        ShortcutLaunchManager.requestCaptureOnNextLaunch()
+        XCTAssertTrue(ShortcutLaunchManager.hasPendingCaptureRequest())
+
+        ShortcutLaunchManager.consumePendingCaptureRequest()
+        XCTAssertFalse(ShortcutLaunchManager.hasPendingCaptureRequest())
+    }
+
     func testPerformanceExample() throws {
         self.measure {
             // Put the code you want to measure the time of here.

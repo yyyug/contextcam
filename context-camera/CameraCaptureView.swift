@@ -46,6 +46,8 @@ class CameraController: NSObject, ObservableObject {
     private var previewLayer: AVCaptureVideoPreviewLayer?
     private var photoOutput: AVCapturePhotoOutput?
     private var videoCaptureDevice: AVCaptureDevice?
+
+    @Published private(set) var isReady = false
     
     // Capture completion callback
     private var captureCompletion: ((Data?) -> Void)?
@@ -56,6 +58,12 @@ class CameraController: NSObject, ObservableObject {
     }
     
     private func setupCamera() {
+        let authorizationStatus = AVCaptureDevice.authorizationStatus(for: .video)
+        guard authorizationStatus != .denied, authorizationStatus != .restricted else {
+            print("Camera access is unavailable")
+            return
+        }
+
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self = self else { return }
             
@@ -90,6 +98,7 @@ class CameraController: NSObject, ObservableObject {
             DispatchQueue.main.async {
                 self.setupPreviewLayer()
                 session.startRunning()
+                self.isReady = true
             }
         }
     }
@@ -127,6 +136,7 @@ class CameraController: NSObject, ObservableObject {
     }
     
     deinit {
+        isReady = false
         captureSession?.stopRunning()
     }
 }
