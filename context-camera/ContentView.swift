@@ -448,9 +448,6 @@ private struct SettingsView: View {
                 await translationLanguageStore.loadLanguages()
                 refreshSelectedLanguageIfNeeded()
             }
-            .onReceive(translationLanguageStore.$availableLanguages) { _ in
-                refreshSelectedLanguageIfNeeded()
-            }
             #endif
         }
     }
