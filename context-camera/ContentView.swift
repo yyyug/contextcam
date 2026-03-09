@@ -99,7 +99,7 @@ struct ContentView: View {
                     self.handleAnalysisResult(
                         result,
                         imageBase64: dataURL,
-                        shouldAttemptTranslation: false
+                        shouldAttemptTranslation: true
                     )
                 }
             }
@@ -769,7 +769,7 @@ private enum QueryPhotoPreset: String, CaseIterable, Identifiable {
         case .dish:
             return "Describe the layout of the food on the plate or tray. Use clock positions or spatial terms"
         case .shortText:
-            return "Extract all alphanumeric codes and text visible in the image, such as labels like 'A', '3-2', or '62k'"
+            return "Describe the alphanumeric text visible in the image"
         }
     }
 
