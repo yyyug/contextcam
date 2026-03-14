@@ -8,7 +8,6 @@
 import SwiftUI
 import UIKit
 import Foundation
-import NaturalLanguage
 import AVKit
 import AVFoundation
 
@@ -48,6 +47,8 @@ struct ContentView: View {
     @AppStorage(ContinuousCaptureInterval.storageKey) private var continuousCaptureIntervalRawValue = ContinuousCaptureInterval.defaultInterval.rawValue
     @AppStorage(CaptionTranslationSettings.isEnabledStorageKey) private var isCaptionTranslationEnabled = false
     @AppStorage(CaptionTranslationSettings.targetLanguageStorageKey) private var selectedTranslationLanguageIdentifier = ""
+    @AppStorage(CustomQueryPhotoPreset.titleStorageKey) private var customQueryTitle = CustomQueryPhotoPreset.defaultTitle
+    @AppStorage(CustomQueryPhotoPreset.promptStorageKey) private var customQueryPrompt = CustomQueryPhotoPreset.defaultPrompt
 
     private var oneShotCaptionLength: CaptionLength {
         get { CaptionLength(rawValue: oneShotCaptionLengthRawValue) ?? .short }
@@ -226,6 +227,20 @@ struct ContentView: View {
     private func takePresetPhoto(_ preset: QueryPhotoPreset) {
         guard !isContinuousCapture else { return }
         captureImageForAnalysis(request: .query(preset))
+    }
+
+    private func takeCustomPresetPhoto() {
+        guard !isContinuousCapture else { return }
+
+        let sanitizedTitle = customQueryTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        let sanitizedPrompt = customQueryPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        let customPreset = QueryPhotoPreset(
+            title: sanitizedTitle.isEmpty ? CustomQueryPhotoPreset.defaultTitle : sanitizedTitle,
+            prompt: sanitizedPrompt.isEmpty ? CustomQueryPhotoPreset.defaultPrompt : sanitizedPrompt,
+            systemImageName: "slider.horizontal.3"
+        )
+
+        captureImageForAnalysis(request: .query(customPreset))
     }
 
     private func scheduleShortcutCaptureIfNeeded() {
@@ -423,6 +438,27 @@ struct ContentView: View {
                     }
 
                     HStack(spacing: 12) {
+                        Button(action: {
+                            takeCustomPresetPhoto()
+                        }) {
+                            VStack(spacing: 6) {
+                                Image(systemName: "slider.horizontal.3")
+                                    .font(.title3)
+                                Text(customButtonTitle)
+                                    .font(.subheadline.weight(.semibold))
+                                    .multilineTextAlignment(.center)
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 14)
+                            .foregroundColor(.white)
+                            .background(Color.black.opacity(0.6))
+                            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                        }
+                        .disabled(areOneShotActionsDisabled)
+                        .opacity(areOneShotActionsDisabled ? 0.6 : 1.0)
+                        .accessibilityLabel(customButtonTitle)
+
                         ForEach(QueryPhotoPreset.allCases) { preset in
                             Button(action: {
                                 takePresetPhoto(preset)
@@ -458,7 +494,9 @@ struct ContentView: View {
                 selectedCaptionLengthRawValue: $oneShotCaptionLengthRawValue,
                 continuousCaptureIntervalRawValue: $continuousCaptureIntervalRawValue,
                 isCaptionTranslationEnabled: $isCaptionTranslationEnabled,
-                selectedTranslationLanguageIdentifier: $selectedTranslationLanguageIdentifier
+                selectedTranslationLanguageIdentifier: $selectedTranslationLanguageIdentifier,
+                customQueryTitle: $customQueryTitle,
+                customQueryPrompt: $customQueryPrompt
             )
         }
         .onAppear {
@@ -520,6 +558,11 @@ struct ContentView: View {
         EmptyView()
         #endif
     }
+
+    private var customButtonTitle: String {
+        let trimmedTitle = customQueryTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmedTitle.isEmpty ? CustomQueryPhotoPreset.defaultTitle : trimmedTitle
+    }
 }
 
 private struct SettingsView: View {
@@ -528,6 +571,8 @@ private struct SettingsView: View {
     @Binding var continuousCaptureIntervalRawValue: Double
     @Binding var isCaptionTranslationEnabled: Bool
     @Binding var selectedTranslationLanguageIdentifier: String
+    @Binding var customQueryTitle: String
+    @Binding var customQueryPrompt: String
 
     #if canImport(Translation)
     @StateObject private var translationLanguageStore = TranslationLanguageStore()
@@ -570,6 +615,24 @@ private struct SettingsView: View {
                     }
 
                     Text("Choose how often Continuous Mode takes a picture. Each completed result is announced when available.")
+                        .font(.footnote)
+                        .foregroundColor(.secondary)
+                }
+
+                Section("Custom Button") {
+                    TextField("Button Name", text: $customQueryTitle)
+                        .textInputAutocapitalization(.words)
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Prompt")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+
+                        TextEditor(text: $customQueryPrompt)
+                            .frame(minHeight: 120)
+                    }
+
+                    Text("This button appears to the left of Product and uses the prompt you save here.")
                         .font(.footnote)
                         .foregroundColor(.secondary)
                 }
@@ -672,10 +735,11 @@ private struct CaptionTranslationRequest: Equatable {
     let id = UUID()
     let sourceText: String
     let targetLanguageIdentifier: String
+    private static let sourceLanguageIdentifier = "en-US"
 
     var configuration: TranslationSession.Configuration {
         TranslationSession.Configuration(
-            source: nil,
+            source: Locale.Language(identifier: Self.sourceLanguageIdentifier),
             target: Locale.Language(identifier: targetLanguageIdentifier)
         )
     }
@@ -694,7 +758,7 @@ enum CaptionTranslationSupport {
         guard let targetLanguageIdentifier, !targetLanguageIdentifier.isEmpty else { return false }
 
         let targetCode = Locale(identifier: targetLanguageIdentifier).language.languageCode?.identifier.lowercased()
-        let sourceCode = Locale(identifier: NLLanguageRecognizer.dominantLanguage(for: trimmedCaption)?.rawValue ?? "").language.languageCode?.identifier.lowercased()
+        let sourceCode = Locale(identifier: "en-US").language.languageCode?.identifier.lowercased()
 
         return targetCode != nil && targetCode != sourceCode
     }
@@ -744,45 +808,37 @@ private enum ContinuousCaptureInterval: Double, CaseIterable, Identifiable {
     }
 }
 
-private enum QueryPhotoPreset: String, CaseIterable, Identifiable {
-    case product
-    case dish
-    case shortText
+private struct QueryPhotoPreset: Identifiable {
+    let title: String
+    let prompt: String
+    let systemImageName: String
 
-    var id: String { rawValue }
+    var id: String { title }
 
-    var title: String {
-        switch self {
-        case .product:
-            return "Product"
-        case .dish:
-            return "Dish"
-        case .shortText:
-            return "Short Text"
-        }
-    }
+    static let allCases: [QueryPhotoPreset] = [
+        QueryPhotoPreset(
+            title: "Product",
+            prompt: "Describe the main product in this image with 1 or 2 sentences, including its brand, name and primary function",
+            systemImageName: "shippingbox.fill"
+        ),
+        QueryPhotoPreset(
+            title: "Dish",
+            prompt: "Describe the layout of the food on the plate or tray. Use clock positions or spatial terms",
+            systemImageName: "fork.knife.circle.fill"
+        ),
+        QueryPhotoPreset(
+            title: "Short Text",
+            prompt: "Describe the alphanumeric text visible in the image",
+            systemImageName: "text.magnifyingglass"
+        )
+    ]
+}
 
-    var prompt: String {
-        switch self {
-        case .product:
-            return "Describe the main product in this image, including its brand, model, and primary function"
-        case .dish:
-            return "Describe the layout of the food on the plate or tray. Use clock positions or spatial terms"
-        case .shortText:
-            return "Describe the alphanumeric text visible in the image"
-        }
-    }
-
-    var systemImageName: String {
-        switch self {
-        case .product:
-            return "shippingbox.fill"
-        case .dish:
-            return "fork.knife.circle.fill"
-        case .shortText:
-            return "text.magnifyingglass"
-        }
-    }
+private enum CustomQueryPhotoPreset {
+    static let titleStorageKey = "customQueryPhotoPresetTitle"
+    static let promptStorageKey = "customQueryPhotoPresetPrompt"
+    static let defaultTitle = "Custom"
+    static let defaultPrompt = "Tell me how many men and women there and describe them; if not found, say No people found"
 }
 
 private extension String {
